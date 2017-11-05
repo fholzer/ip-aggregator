@@ -25,7 +25,8 @@ import org.apache.kafka.streams.kstream.Windowed;
  */
 public class Main {
     private static final String TOPIC_INPUT = "iislogs.raw";
-    private static final String TOPIC_OUTPUT = "iislogs.parsed";
+    private static final String TOPIC_OUTPUT_PARSED = "iislogs.parsed";
+    private static final String TOPIC_OUTPUT_IPAGG = "ipagg.test";
     private static final long TIMEWINDOWSIZE = 100;
     /**
      * @param args the command line arguments
@@ -60,7 +61,7 @@ public class Main {
         KStream<String, ObjectNode> filtered = textLines.filterNot((String k, ObjectNode v) -> v.get("message").asText().startsWith("#"));
         KStream<String, ObjectNode> parsed = filtered.mapValues(new IisLogValueMapper());
 
-        KTable<Windowed<String>, Long> agg = parsed.through(stringSerde, objectNodeSerde, TOPIC_OUTPUT)
+        KTable<Windowed<String>, Long> agg = parsed.through(stringSerde, objectNodeSerde, TOPIC_OUTPUT_PARSED)
                 .mapValues(new ActualClientIpValueMapper())
                 .groupBy(new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR), stringSerde, objectNodeSerde)
                 .count(TimeWindows.of(TIMEWINDOWSIZE));
@@ -68,7 +69,7 @@ public class Main {
         KStream<String, ObjectNode> aggStream = agg.toStream()
                 //.map((Windowed<String> k, Long v) -> new KeyValue<>(k.key() + "@" + k.window().start(), v))
                 .map(new IpAggregationResultKeyValueMapper("all"))
-                .through(stringSerde, objectNodeSerde, "ipagg.test");
+                .through(stringSerde, objectNodeSerde, TOPIC_OUTPUT_IPAGG);
 
         aggStream.print();
 
