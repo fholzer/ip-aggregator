@@ -1,0 +1,21 @@
+{
+    "order": 0,
+    "template": "ipagg-*",
+    "settings": {},
+    "mappings": {
+        "ipagg": {
+            "properties": {
+                "ipaddr": {
+                    "type": "ip"
+                },
+                "service": {
+                    "type": "keyword"
+                },
+                "count": {
+                    "type": "long"
+                }
+            }
+        }
+    },
+    "aliases": {}
+}
