@@ -97,12 +97,12 @@ public class ActualClientIpValueMapper implements ValueMapper<ObjectNode, Object
         String remoteAddr = null;
         String xFwdFor[] = null;
 
-        n = res.get(AccessLog.REMOTEADDR);
+        n = res.get(AccessLog.FIELDNAME_REMOTEADDR);
         if(n != null && n.isTextual()) {
             remoteAddr = n.asText();
         }
 
-        n = res.get(AccessLog.XFWDFOR);
+        n = res.get(AccessLog.FIELDNAME_XFWDFOR);
         if(n != null && n.isTextual()) {
             String xFwdForRaw[] = n.asText().split(",");
             List<String> xFwdForList = Arrays.asList(xFwdForRaw).stream()
