@@ -70,12 +70,14 @@ public class IisLogValueMapper implements ValueMapper<ObjectNode, ObjectNode> {
     @Override
     public ObjectNode apply(ObjectNode v) {
         ObjectNode res = v.deepCopy();
-        String msg = v.get("message").asText();
+        String msg = res.get("message").asText();
+
         Matcher m = pattern.matcher(msg);
         if(!m.matches()) {
             this.addTag(res, TAG_PARSE_ERROR);
             return res;
         }
+        res.remove("message");
 
         try {
             Calendar cDate = javax.xml.bind.DatatypeConverter.parseDateTime(m.group("ts").replace(' ', 'T'));
