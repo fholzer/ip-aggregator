@@ -48,8 +48,8 @@ public class ActualClientIpValueMapperTest {
 
     private void testApplySingle(String remoteAddr, String xFwdFor, String expResult) {
         ObjectNode v = mapper.createObjectNode();
-        v.put(AccessLog.REMOTEADDR, remoteAddr);
-        v.put(AccessLog.XFWDFOR, xFwdFor);
+        v.put(AccessLog.FIELDNAME_REMOTEADDR, remoteAddr);
+        v.put(AccessLog.FIELDNAME_XFWDFOR, xFwdFor);
         ObjectNode result = instance.apply(v);
         assertEquals(expResult, result.get(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR).asText());
     }
