@@ -1,6 +1,7 @@
 package com.gvcgroup.ipaggregator;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.gvcgroup.ipaggregator.processor.ActualClientIpValueMapper;
 import com.gvcgroup.ipaggregator.processor.ElkJsonNodeTimeStampExtractor;
 import com.gvcgroup.ipaggregator.processor.IisLogValueMapper;
 import com.gvcgroup.ipaggregator.processor.IpAggregationResultKeyValueMapper;
@@ -60,24 +61,24 @@ public class Main {
         KStream<String, ObjectNode> parsed = filtered.mapValues(new IisLogValueMapper());
 
         KTable<Windowed<String>, Long> agg = parsed.through(stringSerde, objectNodeSerde, TOPIC_OUTPUT)
-                .groupBy(new JsonStringKeyValueMapper(IisLogValueMapper.FIELDNAME_REMOTEADDR), stringSerde, objectNodeSerde)
+                .mapValues(new ActualClientIpValueMapper())
+                .groupBy(new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR), stringSerde, objectNodeSerde)
                 .count(TimeWindows.of(TIMEWINDOWSIZE));
-        
+
         KStream<String, ObjectNode> aggStream = agg.toStream()
                 //.map((Windowed<String> k, Long v) -> new KeyValue<>(k.key() + "@" + k.window().start(), v))
                 .map(new IpAggregationResultKeyValueMapper("all"))
                 .through(stringSerde, objectNodeSerde, "ipagg.test");
-        
-        aggStream.print();
-        
-        /*
-                .selectKey(new JsonStringKeyValueMapper(IisLogValueMapper.FIELDNAME_REMOTEADDR))
-                .groupByKey(stringSerde, objectNodeSerde)
-                .count(TimeWindows.of(TIMEWINDOWSIZE))
-                .toStream();
-        */
 
-        // * how to branch by service, retaining this as additional dimension
+        aggStream.print();
+
+        /*
+         * We'll need a dedicated branch per service.
+         * Can't send historic data to kafka, because we can't process original
+         *     event timestamp in kafka. This is by design. Events may be
+         *     ingested and processed out of order otherwise, this would hinder
+         *     us doing windowed aggregations.
+         */
 
         final KafkaStreams streams = new KafkaStreams(builder, streamsConfiguration);
         streams.cleanUp();

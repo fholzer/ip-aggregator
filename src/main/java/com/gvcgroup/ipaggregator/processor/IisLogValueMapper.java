@@ -3,6 +3,7 @@ package com.gvcgroup.ipaggregator.processor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.gvcgroup.ipaggregator.definitions.AccessLog;
 import java.util.Calendar;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,14 +25,12 @@ public class IisLogValueMapper implements ValueMapper<ObjectNode, ObjectNode> {
     public static final String FIELDNAME_ARGS = "args";
     public static final String FIELDNAME_PORT = "localPort";
     public static final String FIELDNAME_USERNAME = "username";
-    public static final String FIELDNAME_REMOTEADDR = "remoteAddr";
     public static final String FIELDNAME_USERAGENT = "userAgent";
     public static final String FIELDNAME_REFERER = "referer";
     public static final String FIELDNAME_STATUS = "status";
     public static final String FIELDNAME_SUBSTATUS = "subStatus";
     public static final String FIELDNAME_WIN32STATUS = "win32Status";
     public static final String FIELDNAME_RESPONSETIME = "responseTime";
-    public static final String FIELDNAME_XFWDFOR = "xForwardedFor";
     public static final String FIELDNAME_EXTRA = "extraneous";
     public static final String FIELDNAME_TAG = "tag";
     public static final String TAG_PARSE_ERROR = "parseerror";
@@ -85,12 +84,12 @@ public class IisLogValueMapper implements ValueMapper<ObjectNode, ObjectNode> {
         } catch(Exception ex) {
             log.error(ERROR_PARSE_TS, ex);
         }
-        
+
         res.put(FIELDNAME_IP, m.group("ip"));
         res.put(FIELDNAME_PORT, m.group("port"));
         res.put(FIELDNAME_METHOD, m.group("method"));
         res.put(FIELDNAME_URI, m.group("uri"));
-        res.put(FIELDNAME_REMOTEADDR, m.group("remoteaddr"));
+        res.put(AccessLog.REMOTEADDR, m.group("remoteaddr"));
         res.put(FIELDNAME_STATUS, m.group("status"));
         res.put(FIELDNAME_SUBSTATUS, m.group("substatus"));
         res.put(FIELDNAME_WIN32STATUS, m.group("win32status"));
@@ -119,7 +118,7 @@ public class IisLogValueMapper implements ValueMapper<ObjectNode, ObjectNode> {
 
         tmp = m.group("xfwdfor");
         if(!tmp.equals(EMPTY)) {
-            res.put(FIELDNAME_XFWDFOR, tmp.replace('+', ' '));
+            res.put(AccessLog.XFWDFOR, tmp.replace('+', ' '));
         }
 
         tmp = m.group("extra");
