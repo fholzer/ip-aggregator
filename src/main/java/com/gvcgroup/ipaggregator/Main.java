@@ -25,7 +25,6 @@ import org.apache.kafka.streams.kstream.Windowed;
  */
 public class Main {
     private static final String TOPIC_INPUT = "iislogs.raw";
-    private static final String TOPIC_OUTPUT_PARSED = "iislogs.parsed";
     private static final String TOPIC_OUTPUT_IPAGG = "ipagg.test";
     private static final long TIMEWINDOWSIZE = 100;
     /**
@@ -61,8 +60,7 @@ public class Main {
         KStream<String, ObjectNode> filtered = textLines.filterNot((String k, ObjectNode v) -> v.get("message").asText().startsWith("#"));
         KStream<String, ObjectNode> parsed = filtered.mapValues(new IisLogValueMapper());
 
-        KTable<Windowed<String>, Long> agg = parsed.through(stringSerde, objectNodeSerde, TOPIC_OUTPUT_PARSED)
-                .mapValues(new ActualClientIpValueMapper())
+        KTable<Windowed<String>, Long> agg = parsed.mapValues(new ActualClientIpValueMapper())
                 .groupBy(new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR), stringSerde, objectNodeSerde)
                 .count(TimeWindows.of(TIMEWINDOWSIZE));
 
