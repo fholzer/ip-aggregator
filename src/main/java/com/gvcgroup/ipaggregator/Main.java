@@ -1,13 +1,19 @@
 package com.gvcgroup.ipaggregator;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.gvcgroup.ipaggregator.model.Isp;
 import com.gvcgroup.ipaggregator.processor.ActualClientIpValueMapper;
 import com.gvcgroup.ipaggregator.processor.ElkJsonNodeTimeStampExtractor;
 import com.gvcgroup.ipaggregator.processor.IisLogValueMapper;
 import com.gvcgroup.ipaggregator.processor.IpAggregationResultKeyValueMapper;
+import com.gvcgroup.ipaggregator.processor.IspAggregationResultKeyValueMapper;
+import com.gvcgroup.ipaggregator.processor.IspKeyValueMapper;
 import com.gvcgroup.ipaggregator.processor.JsonStringKeyValueMapper;
+import com.gvcgroup.ipaggregator.serialization.IspDeserializer;
+import com.gvcgroup.ipaggregator.serialization.IspSerializer;
 import com.gvcgroup.ipaggregator.serialization.ObjectNodeDeserializer;
 import com.gvcgroup.ipaggregator.serialization.ObjectNodeSerializer;
+import java.io.IOException;
 import java.util.Properties;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
@@ -25,12 +31,13 @@ import org.apache.kafka.streams.kstream.Windowed;
  */
 public class Main {
     private static final String TOPIC_INPUT = "iislogs.raw";
-    private static final String TOPIC_OUTPUT_IPAGG = "ipagg.test";
-    private static final long TIMEWINDOWSIZE = 100;
+    private static final long TIMEWINDOW_SIZE = 1000;
+    private static final String TOPIC_OUTPUT_LOGAGG_IP = "logagg.ip.test";
+    private static final String TOPIC_OUTPUT_LOGAGG_ISP = "logagg.isp.test";
     /**
      * @param args the command line arguments
      */
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         final String bootstrapServers = args.length > 0 ? args[0] : "localhost:9092";
         final Properties streamsConfiguration = new Properties();
         // Give the Streams application a unique name.  The name must be unique in the Kafka cluster
@@ -50,26 +57,56 @@ public class Main {
 
         final Serde<ObjectNode> objectNodeSerde = Serdes.serdeFrom(new ObjectNodeSerializer(), new ObjectNodeDeserializer());
         final Serde<String> stringSerde = Serdes.String();
+        final Serde<Isp> ispSerde = Serdes.serdeFrom(new IspSerializer(), new IspDeserializer());
 
         // In the subsequent lines we define the processing topology of the Streams application.
         final KStreamBuilder builder = new KStreamBuilder();
 
 
+        // Build streams
+
         final KStream<String, ObjectNode> textLines = builder.stream(new ElkJsonNodeTimeStampExtractor(), stringSerde, objectNodeSerde, new String[] { TOPIC_INPUT });
 
+        // TODO filter events that don't have a message key => parse error
+
+        // remove comment lines
         KStream<String, ObjectNode> filtered = textLines.filterNot((String k, ObjectNode v) -> v.get("message").asText().startsWith("#"));
+
+        // parse log line
         KStream<String, ObjectNode> parsed = filtered.mapValues(new IisLogValueMapper());
 
-        KTable<Windowed<String>, Long> agg = parsed.mapValues(new ActualClientIpValueMapper())
-                .groupBy(new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR), stringSerde, objectNodeSerde)
-                .count(TimeWindows.of(TIMEWINDOWSIZE));
+        // evaluate actual client ip address
+        KStream<String, ObjectNode> ipEvaluated = parsed.mapValues(new ActualClientIpValueMapper());
 
-        KStream<String, ObjectNode> aggStream = agg.toStream()
+
+        // Aggregate based on IP
+
+        KTable<Windowed<String>, Long> aggByIpTable = ipEvaluated
+                .groupBy(new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR), stringSerde, objectNodeSerde)
+                .count(TimeWindows.of(TIMEWINDOW_SIZE));
+
+        KStream<String, ObjectNode> aggByIpStream = aggByIpTable.toStream()
                 //.map((Windowed<String> k, Long v) -> new KeyValue<>(k.key() + "@" + k.window().start(), v))
                 .map(new IpAggregationResultKeyValueMapper("all"))
-                .through(stringSerde, objectNodeSerde, TOPIC_OUTPUT_IPAGG);
+                .through(stringSerde, objectNodeSerde, TOPIC_OUTPUT_LOGAGG_IP);
 
-        aggStream.print();
+        aggByIpStream.print();
+
+
+        // Aggregate based on ISP
+
+        IspKeyValueMapper ispMapper = new IspKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR);
+
+        KTable<Windowed<Isp>, Long> aggByIspTable = ipEvaluated
+                .groupBy(ispMapper, ispSerde, objectNodeSerde)
+                .count(TimeWindows.of(TIMEWINDOW_SIZE));
+
+        KStream<String, ObjectNode> aggByIspStream = aggByIspTable.toStream()
+                .map(new IspAggregationResultKeyValueMapper())
+                .through(stringSerde, objectNodeSerde, TOPIC_OUTPUT_LOGAGG_ISP);
+
+        aggByIspStream.print();
+
 
         /*
          * We'll need a dedicated branch per service.
