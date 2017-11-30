@@ -4,17 +4,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.gvcgroup.ipaggregator.model.Isp;
 import com.gvcgroup.ipaggregator.processor.ActualClientIpValueMapper;
 import com.gvcgroup.ipaggregator.processor.ElkJsonNodeTimeStampExtractor;
+import com.gvcgroup.ipaggregator.processor.ErrorAggregationKeyValueMapper;
 import com.gvcgroup.ipaggregator.processor.IisLogValueMapper;
 import com.gvcgroup.ipaggregator.processor.IpAggregationResultKeyValueMapper;
 import com.gvcgroup.ipaggregator.processor.IspAggregationResultKeyValueMapper;
 import com.gvcgroup.ipaggregator.processor.IspKeyValueMapper;
 import com.gvcgroup.ipaggregator.processor.JsonStringKeyValueMapper;
+import com.gvcgroup.ipaggregator.processor.LogAppenTimestampTransformerSupplier;
 import com.gvcgroup.ipaggregator.serialization.IspDeserializer;
 import com.gvcgroup.ipaggregator.serialization.IspSerializer;
 import com.gvcgroup.ipaggregator.serialization.ObjectNodeDeserializer;
 import com.gvcgroup.ipaggregator.serialization.ObjectNodeSerializer;
 import java.io.IOException;
 import java.util.Properties;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
@@ -32,10 +35,13 @@ import org.apache.kafka.streams.kstream.Windowed;
 public class Main {
     private static final String TOPIC_INPUT = "iislogs.raw";
     private static final long TIMEWINDOW_SIZE = 1000;
+    private static final long AGE_THRESHOLD = 1000;
     private static final String TOPIC_OUTPUT_LOGAGG_IP = "logagg.ip.test";
     private static final String TOPIC_OUTPUT_LOGAGG_ISP = "logagg.isp.test";
+    private static final String TOPIC_OUTPUT_LOGAGG_ERR = "logagg.errors";
     /**
      * @param args the command line arguments
+     * @throws java.io.IOException
      */
     public static void main(String[] args) throws IOException {
         final String bootstrapServers = args.length > 0 ? args[0] : "localhost:9092";
@@ -54,6 +60,7 @@ public class Main {
         streamsConfiguration.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 60 * 1000);
         // For illustrative purposes we disable record caches
         streamsConfiguration.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, 0);
+        streamsConfiguration.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         final Serde<ObjectNode> objectNodeSerde = Serdes.serdeFrom(new ObjectNodeSerializer(), new ObjectNodeDeserializer());
         final Serde<String> stringSerde = Serdes.String();
@@ -67,22 +74,41 @@ public class Main {
 
         final KStream<String, ObjectNode> textLines = builder.stream(new ElkJsonNodeTimeStampExtractor(), stringSerde, objectNodeSerde, new String[] { TOPIC_INPUT });
 
-        // TODO filter events that don't have a message key => parse error
+        // filter events that don't have a message key => parse error
+        final KStream<String, ObjectNode>[] messageValidationBranch = textLines.branch(
+                (String k, ObjectNode v) -> v.has("message") && v.get("message").isTextual(),
+                (String k, ObjectNode v) -> !v.has("message") || !v.get("message").isTextual()
+        );
+
+        buildErrorAggregation(messageValidationBranch[1], "NoMessage");
 
         // remove comment lines
-        KStream<String, ObjectNode> filtered = textLines.filterNot((String k, ObjectNode v) -> v.get("message").asText().startsWith("#"));
+        KStream<String, ObjectNode> filtered = messageValidationBranch[0].filterNot((String k, ObjectNode v) -> v.get("message").asText().startsWith("#"));
 
         // parse log line
         KStream<String, ObjectNode> parsed = filtered.mapValues(new IisLogValueMapper());
 
+        // inject log append timestamp
+        KStream<String, ObjectNode> timestamped = parsed.transformValues(new LogAppenTimestampTransformerSupplier());
+
+        // branch on age threshold
+        KStream<String, ObjectNode>[] temporalBranches = timestamped.branch(
+                (String k, ObjectNode v) -> v.get("timestamp").asLong() >= v.get("appendTs").asLong() - AGE_THRESHOLD,
+                (String k, ObjectNode v) -> v.get("timestamp").asLong() < v.get("appendTs").asLong() - AGE_THRESHOLD
+        );
+
+        buildErrorAggregation(temporalBranches[1], "Outdated");
+
         // evaluate actual client ip address
-        KStream<String, ObjectNode> ipEvaluated = parsed.mapValues(new ActualClientIpValueMapper());
+        KStream<String, ObjectNode> ipEvaluated = temporalBranches[0].mapValues(new ActualClientIpValueMapper());
 
 
         // Aggregate based on IP
 
+        JsonStringKeyValueMapper jsonMapper = new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR);
+
         KTable<Windowed<String>, Long> aggByIpTable = ipEvaluated
-                .groupBy(new JsonStringKeyValueMapper(ActualClientIpValueMapper.FIELDNAME_ACTUALREMOTEADDR), stringSerde, objectNodeSerde)
+                .groupBy(jsonMapper, stringSerde, objectNodeSerde)
                 .count(TimeWindows.of(TIMEWINDOW_SIZE));
 
         KStream<String, ObjectNode> aggByIpStream = aggByIpTable.toStream()
@@ -122,6 +148,17 @@ public class Main {
 
         // Add shutdown hook to respond to SIGTERM and gracefully close Kafka Streams
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
+    }
+
+    private static void buildErrorAggregation(KStream<String, ObjectNode> stream, String error) {
+        KTable<Windowed<String>, Long> errAggTable = stream.selectKey((String k, ObjectNode v) -> error)
+                .groupByKey()
+                .count(TimeWindows.of(TIMEWINDOW_SIZE));
+
+        KStream<String, ObjectNode> errAggStream = errAggTable.toStream()
+                .map(new ErrorAggregationKeyValueMapper(error));
+
+        errAggStream.to(TOPIC_OUTPUT_LOGAGG_ERR);
     }
 
 }

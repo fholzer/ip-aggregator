@@ -16,9 +16,11 @@ import org.apache.kafka.streams.kstream.Windowed;
  */
 public class IpAggregationResultKeyValueMapper implements KeyValueMapper<Windowed<String>, Long, KeyValue<String, ObjectNode>> {
     private static final String FIELDNAME_TS = "@timestamp";
+    private static final String FIELDNAME_TYPE = "type";
     private static final String FIELDNAME_SERVICE = "service";
     private static final String FIELDNAME_IP = "ipaddr";
     private static final String FIELDNAME_COUNT = "count";
+    private static final String FIELDVALUE_TYPE = "ipagg";
     private final ObjectMapper mapper;
     private final String serviceName;
 
@@ -32,6 +34,7 @@ public class IpAggregationResultKeyValueMapper implements KeyValueMapper<Windowe
         ObjectNode root = mapper.createObjectNode();
         root.put(FIELDNAME_TS, ZonedDateTime.ofInstant(Instant.ofEpochMilli(k.window().start()), ZoneId.of("UTC"))
                 .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+        root.put(FIELDNAME_TYPE, FIELDVALUE_TYPE);
         root.put(FIELDNAME_SERVICE, this.serviceName);
         root.put(FIELDNAME_IP, k.key());
         root.put(FIELDNAME_COUNT, v);

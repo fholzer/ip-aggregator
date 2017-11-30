@@ -2,7 +2,6 @@ package com.gvcgroup.ipaggregator.processor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.gvcgroup.ipaggregator.model.Isp;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -15,34 +14,28 @@ import org.apache.kafka.streams.kstream.Windowed;
  *
  * @author Ferdinand Holzer
  */
-public class IspAggregationResultKeyValueMapper implements KeyValueMapper<Windowed<Isp>, Long, KeyValue<String, ObjectNode>> {
+public class ErrorAggregationKeyValueMapper implements KeyValueMapper<Windowed<String>, Long, KeyValue<String, ObjectNode>> {
     private static final String FIELDNAME_TS = "@timestamp";
     private static final String FIELDNAME_TYPE = "type";
-    private static final String FIELDNAME_ASN = "asn";
-    private static final String FIELDNAME_ASO = "aso";
-    private static final String FIELDNAME_ISP = "isp";
-    private static final String FIELDNAME_ORG = "org";
+    private static final String FIELDNAME_ERROR = "error";
     private static final String FIELDNAME_COUNT = "count";
-    private static final String FIELDVALUE_TYPE = "ispagg";
     private final ObjectMapper mapper;
+    private final String error;
 
-    public IspAggregationResultKeyValueMapper() {
+    public ErrorAggregationKeyValueMapper(String error) {
         this.mapper = new ObjectMapper();
+        this.error = error;
     }
 
     @Override
-    public KeyValue<String, ObjectNode> apply(Windowed<Isp> k, Long v) {
-        Isp i = k.key();
+    public KeyValue<String, ObjectNode> apply(Windowed<String> k, Long v) {
         ObjectNode root = mapper.createObjectNode();
         root.put(FIELDNAME_TS, ZonedDateTime.ofInstant(Instant.ofEpochMilli(k.window().start()), ZoneId.of("UTC"))
                 .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
-        root.put(FIELDNAME_TYPE, FIELDVALUE_TYPE);
-        root.put(FIELDNAME_ASN, i.getAsn());
-        //root.put(FIELDNAME_ASO, i.getAso());
-        root.put(FIELDNAME_ISP, i.getIsp());
-        //root.put(FIELDNAME_ORG, i.getOrg());
+        root.put(FIELDNAME_TYPE, "error");
+        root.put(FIELDNAME_ERROR, this.error);
         root.put(FIELDNAME_COUNT, v);
-        return new KeyValue<>(null, root);
+        return KeyValue.pair(null, root);
     }
 
 }
