@@ -1,1 +1,3 @@
 target/
+/nbproject/
+GeoIP2-ISP.mmdb
